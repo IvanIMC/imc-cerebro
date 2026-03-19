@@ -12,15 +12,32 @@ jobs:
     steps:
       - name: Trigger secure GESU import
         run: |
-          HTTP_CODE=$(curl -s -o response.json -w "%{http_code}" \
+          set +e
+
+          curl -sS -o response.json -w "%{http_code}" \
             -X POST "${{ secrets.RAILWAY_GESU_URL }}" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Type: application/json")
+            -H "Content-Type: application/json" \
+            > http_code.txt
 
+          CURL_EXIT=$?
+          HTTP_CODE=$(cat http_code.txt)
+
+          echo "CURL_EXIT=$CURL_EXIT"
           echo "HTTP_CODE=$HTTP_CODE"
-          cat response.json
 
-          if [ "$HTTP_CODE" -ne 200 ]; then
-            echo "Workflow failed because endpoint returned HTTP $HTTP_CODE"
-            exit 1
+          if [ -f response.json ]; then
+            cat response.json
           fi
+
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "409" ]; then
+            exit 0
+          fi
+
+          if [ "$CURL_EXIT" -eq 56 ]; then
+            echo "Warning: curl recibió exit 56 después de disparar el endpoint. La corrida puede haberse ejecutado igual."
+            exit 0
+          fi
+
+          echo "Workflow failed. HTTP_CODE=$HTTP_CODE CURL_EXIT=$CURL_EXIT"
+          exit 1
