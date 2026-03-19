@@ -29,7 +29,6 @@ function extractItemsFromResponse(data) {
   if (Array.isArray(data.result)) return data.result;
   if (Array.isArray(data.results)) return data.results;
 
-  // Caso GESU: data.data o data.items puede venir como objeto con claves "1", "2", "3", etc.
   if (data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
     return Object.values(data.data);
   }
@@ -318,6 +317,26 @@ async function importGesuPageWithSyncRun(pageNumber, syncRunId) {
   };
 }
 
+async function runNormalization(syncRunId) {
+  try {
+    const { error } = await supabase.rpc('normalize_gesu_sync_run', {
+      p_sync_run_id: syncRunId
+    });
+
+    if (error) throw error;
+
+    return {
+      ok: true,
+      error: null
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error.message
+    };
+  }
+}
+
 export async function importGesuOnePage(pageNumber = 1, options = {}) {
   const {
     mode = 'manual_test_one_page',
@@ -447,13 +466,8 @@ export async function importGesuAllPages(options = {}) {
         }
       );
 
-      if (result.fetched === 0) {
-        break;
-      }
-
-      if (!result.hasMore) {
-        break;
-      }
+      if (result.fetched === 0) break;
+      if (!result.hasMore) break;
 
       page += 1;
     }
@@ -475,12 +489,22 @@ export async function importGesuAllPages(options = {}) {
       }
     );
 
+    const normalization = await runNormalization(syncRun.id);
+
+    await mergeSyncRunMetadata(syncRun.id, {
+      normalization_executed: true,
+      normalization_ok: normalization.ok,
+      normalization_error: normalization.error,
+      normalization_at: new Date().toISOString()
+    });
+
     return {
       ok: true,
       syncRunId: syncRun.id,
       pagesProcessed,
       fetched: totalFetched,
-      inserted: totalInserted
+      inserted: totalInserted,
+      normalization
     };
   } catch (error) {
     await updateSyncRunWithMergedMetadata(
